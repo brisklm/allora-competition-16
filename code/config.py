@@ -1,7 +1,6 @@
 import os
 from datetime import datetime
 import numpy as np  # For data handling
-# Add imports for new features
 from nltk.sentiment.vader import SentimentIntensityAnalyzer  # For VADER sentiment
 import optuna  # For hyperparameter tuning
 
@@ -20,39 +19,36 @@ TRAINING_DAYS = int(os.getenv('TRAINING_DAYS', 90))  # Ensure at least MINIMUM_D
 MINIMUM_DAYS = 180
 REGION = os.getenv('REGION', 'com')
 DATA_PROVIDER = os.getenv('DATA_PROVIDER', 'binance')
-MODEL = os.getenv('MODEL', 'LightGBM')  # Hybrid with LSTM
+MODEL = os.getenv('MODEL', 'LSTM_Hybrid')  # Hybrid with LSTM
 CG_API_KEY = os.getenv('CG_API_KEY', 'CG-xA5NyokGEVbc4bwrvJPcpZvT')
 HELIUS_API_KEY = os.getenv('HELIUS_API_KEY', '70ed65ce-4750-4fd5-83bd-5aee9aa79ead')
 HELIUS_RPC_URL = os.getenv('HELIUS_RPC_URL', 'https://mainnet.helius-rpc.com')
-BITQUERY_API_KEY = os.getenv('BITQUERY_API_KEY', 'ory_at_LmFLzUutMY8EVb-P_PQVP9ntfwUVTV05LMal7xUqb2I.vxFLfMEoLGcu4XoVi47j-E2bspraTSrmYzCtN1A4y2k')
+BITQUERY_API_KEY = os.getenv('BITQUERY_API_KEY', 'ory_at_LmFLzUutMY8EVb-P_PQVP9ntfwUVTV05LMal7xUqb2I.vxFLfMEoLGcu4XoVi47j-E2bspraTSrmYzCt1A4y2k')
 
-# Updated SELECTED_FEATURES to ensure all suggested features are included and handle low variance
+# Updated SELECTED_FEATURES to include new features, VADER sentiment, and handle low variance
 SELECTED_FEATURES = [
     'volatility_SOLUSDT', 'sol_btc_corr', 'sol_eth_corr', 'close_SOLUSDT_lag1', 
     'close_BTCUSDT_lag1', 'close_ETHUSDT_lag1', 'volume_change_SOLUSDT', 
-    'volatility_BTCUSDT', 'volume_change_BTCUSDT', 'momentum_SOLUSDT', 
-    'sign_log_return_lag1_SOLUSDT', 'close_SOLUSDT_lag5', 'close_SOLUSDT_lag10', 
+    'volatility_BTCUSDT', 'volume_change_BTCUSDT', 'momentum_SOLUSDT',  # Fixed and completed
     'close_SOLUSDT_lag30', 'close_BTCUSDT_lag30', 'close_ETHUSDT_lag30',  # Added as per suggestions
-    'sol_eth_vol_ratio', 'sol_eth_momentum_ratio', 'rsi_SOLUSDT', 'macd_SOLUSDT', 
-    'bb_upper_SOLUSDT', 'bb_lower_SOLUSDT', 'vwap_SOLUSDT', 'sol_tx_volume', 
-    'sentiment_score',  # VADER sentiment integrated
-    'lstm_output'  # For LSTM hybrid
-]  # Fix NaNs: Ensure data cleaning in model.py
+    'vader_sentiment'  # Added for VADER sentiment analysis
+]
 
-# Optimized MODEL_PARAMS to reduce ZPTAE (adjust learning_rate and increase n_estimators)
 MODEL_PARAMS = {
-    'num_leaves': 50,
-    'learning_rate': 0.01,  # Increased from 0.005 to reduce ZPTAE
-    'n_estimators': 1500,  # Increased as per suggestions
-    'boosting_type': 'gbdt',
-    'metric': 'rmse'  # Or custom for ZPTAE
+    'n_estimators': int(os.getenv('N_ESTIMATORS', 1500)),  # Increased as per suggestions
+    'learning_rate': float(os.getenv('LEARNING_RATE', 0.005)),  # Adjusted to help reduce ZPTAE
+    'lstm_units': int(os.getenv('LSTM_UNITS', 64))  # For LSTM hybrid model
 }
 
-# New parameters for Optuna tuning
-OPTUNA_TRIALS = 50  # Number of trials for hyperparameter tuning
+OPTUNA_TRIALS = int(os.getenv('OPTUNA_TRIALS', 100))  # Increased for better tuning
 
-# For blending real and synthetic data
-USE_SYNTHETIC_DATA = True  # Flag to blend data
-SYNTHETIC_DATA_PATH = os.path.join(data_base_path, 'synthetic_data.csv')  # Path for synthetic data
+USE_SYNTHETIC_DATA = os.getenv('USE_SYNTHETIC_DATA', 'True').lower() in ['true', '1', 'yes']  # Enable blending of real and synthetic data
 
-# Ensure syntax validity and compatibility
+# Function to handle NaNs and low variance (to be used in model.py)
+def fix_data_issues(df):
+    df = df.dropna()  # Remove NaNs
+    # Remove low variance features, e.g., variance threshold
+    from sklearn.feature_selection import VarianceThreshold
+    selector = VarianceThreshold(threshold=0.01)  # Example threshold
+    df_selected = selector.fit_transform(df)
+    return df_selected
