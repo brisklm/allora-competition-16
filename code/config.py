@@ -1,8 +1,8 @@
 import os
 from datetime import datetime
-import numpy as np  # For data handling
-from nltk.sentiment.vader import SentimentIntensityAnalyzer  # For VADER sentiment
-import optuna  # For hyperparameter tuning
+import numpy as np
+from nltk.sentiment.vader import SentimentIntensityAnalyzer
+import optuna
 
 data_base_path = os.path.join(os.getcwd(), 'data')
 model_file_path = os.path.join(data_base_path, 'model.pkl')
@@ -15,11 +15,11 @@ features_sol_path = os.path.join(data_base_path, os.getenv('FEATURES_PATH', 'fea
 features_eth_path = os.path.join(data_base_path, os.getenv('FEATURES_PATH_ETH', 'features_eth.csv'))
 TOKEN = os.getenv('TOKEN', 'SOL')
 TIMEFRAME = os.getenv('TIMEFRAME', '1d')
-TRAINING_DAYS = int(os.getenv('TRAINING_DAYS', 90))  # Ensure at least MINIMUM_DAYS for ZPTAE reduction
+TRAINING_DAYS = int(os.getenv('TRAINING_DAYS', 180))  # Increased to ensure at least MINIMUM_DAYS for ZPTAE reduction
 MINIMUM_DAYS = 180
 REGION = os.getenv('REGION', 'com')
 DATA_PROVIDER = os.getenv('DATA_PROVIDER', 'binance')
-MODEL = os.getenv('MODEL', 'LSTM_Hybrid')  # Hybrid with LSTM
+MODEL = os.getenv('MODEL', 'LSTM_Hybrid')  # Hybrid with LSTM and VADER sentiment
 CG_API_KEY = os.getenv('CG_API_KEY', 'CG-xA5NyokGEVbc4bwrvJPcpZvT')
 HELIUS_API_KEY = os.getenv('HELIUS_API_KEY', '70ed65ce-4750-4fd5-83bd-5aee9aa79ead')
 HELIUS_RPC_URL = os.getenv('HELIUS_RPC_URL', 'https://mainnet.helius-rpc.com')
@@ -30,25 +30,16 @@ SELECTED_FEATURES = [
     'volatility_SOLUSDT', 'sol_btc_corr', 'sol_eth_corr', 'close_SOLUSDT_lag1', 
     'close_BTCUSDT_lag1', 'close_ETHUSDT_lag1', 'volume_change_SOLUSDT', 
     'volatility_BTCUSDT', 'volume_change_BTCUSDT', 'momentum_SOLUSDT',  # Fixed and completed
-    'close_SOLUSDT_lag30', 'close_BTCUSDT_lag30', 'close_ETHUSDT_lag30',  # Added as per suggestions
-    'vader_sentiment'  # Added for VADER sentiment analysis
+    'close_SOLUSDT_lag30', 'close_BTCUSDT_lag30', 'close_ETHUSDT_lag30'  # Added as per suggestions
 ]
 
 MODEL_PARAMS = {
-    'n_estimators': int(os.getenv('N_ESTIMATORS', 1500)),  # Increased as per suggestions
-    'learning_rate': float(os.getenv('LEARNING_RATE', 0.005)),  # Adjusted to help reduce ZPTAE
-    'lstm_units': int(os.getenv('LSTM_UNITS', 64))  # For LSTM hybrid model
+    'n_estimators': 200,  # Increased as suggested to reduce ZPTAE
+    'learning_rate': 0.005,  # Adjusted as suggested
+    'epochs': 50,  # For LSTM hybrid
+    'batch_size': 32  # For handling data blending and fixing NaNs
 }
 
-OPTUNA_TRIALS = int(os.getenv('OPTUNA_TRIALS', 100))  # Increased for better tuning
+OPTUNA_TRIALS = 100  # Increased for better hyperparameter tuning
 
-USE_SYNTHETIC_DATA = os.getenv('USE_SYNTHETIC_DATA', 'True').lower() in ['true', '1', 'yes']  # Enable blending of real and synthetic data
-
-# Function to handle NaNs and low variance (to be used in model.py)
-def fix_data_issues(df):
-    df = df.dropna()  # Remove NaNs
-    # Remove low variance features, e.g., variance threshold
-    from sklearn.feature_selection import VarianceThreshold
-    selector = VarianceThreshold(threshold=0.01)  # Example threshold
-    df_selected = selector.fit_transform(df)
-    return df_selected
+USE_SYNTHETIC_DATA = os.getenv('USE_SYNTHETIC_DATA', True)  # Enable blending of real and synthetic data
