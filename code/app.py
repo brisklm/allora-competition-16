@@ -28,7 +28,7 @@ FLASK_PORT = int(os.getenv("FLASK_PORT", 8001))
 TOOLS = [
     {
         "name": "optimize",
-        "description": "Triggers model optimization using Optuna tuning and returns results. Incorporates VADER sentiment and LSTM hybrid model. Aims to reduce ZPTAE below 0.5 by tuning hyperparameters (e.g., increased n_estimators, adjusted learning_rate), blending real/synthetic data, and handling NaNs/low variance.",
+        "description": "Triggers model optimization using Optuna tuning and returns results. Incorporates VADER sentiment and LSTM hybrid model. Aims to reduce ZPTAE below 0.5 by tuning hyperparameters (e.g., increased n_estimators to 200, adjusted learning_rate to 0.01), blending real/synthetic data, and handling NaNs/low variance.",
         "parameters": {}
     },
     {
@@ -39,19 +39,11 @@ TOOLS = [
             "content": {"type": "string", "description": "Complete source code content", "required": True},
             "artifact_id": {"type": "string", "description": "Artifact UUID", "required": False},
             "artifact_version_id": {"type": "string", "description": "Version UUID", "required": False},
-            "contentType": {"type": "string", "description": "Content type (e.g., text/python)", "required": False}
-        }
-    },
-    {
-        "name": "commit_to_github",
-        "description": "Commits changes to GitHub repository.",
-        "parameters": {
-            "message": {"type": "string", "description": "Commit message", "required": True},
-            "files": {"type": "array", "description": "List of files to commit", "items": {"type": "string"}}
+            "contentType": {"type": "string", "description": "Content type (e.g., text/python)", "required": True}
         }
     }
 ]
 
-# Rest of the app logic remains compatible; ensure model.py handles optimizations.
+# Rest of the app logic remains as is, assuming it's compatible.
 if __name__ == '__main__':
-    app.run(port=FLASK_PORT, host='0.0.0.0')
+    app.run(port=FLASK_PORT)
