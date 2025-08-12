@@ -28,7 +28,7 @@ FLASK_PORT = int(os.getenv("FLASK_PORT", 8001))
 TOOLS = [
     {
         "name": "optimize",
-        "description": "Triggers model optimization using Optuna tuning and returns results. Incorporates VADER sentiment and LSTM hybrid model. Aims to reduce ZPTAE below 0.5 by tuning hyperparameters and blending real/synthetic data.",
+        "description": "Triggers model optimization using Optuna tuning and returns results. Incorporates VADER sentiment and LSTM hybrid model. Aims to reduce ZPTAE below 0.5 by tuning hyperparameters (e.g., increased n_estimators, adjusted learning_rate), blending real/synthetic data, and handling NaNs/low variance.",
         "parameters": {}
     },
     {
@@ -44,10 +44,14 @@ TOOLS = [
     },
     {
         "name": "commit_to_github",
-        "description": "Commits files to the GitHub repository after optimization.",
+        "description": "Commits changes to GitHub repository.",
         "parameters": {
-            "files": {"type": "array", "description": "List of files to commit", "required": True},
-            "message": {"type": "string", "description": "Commit message", "required": True}
+            "message": {"type": "string", "description": "Commit message", "required": True},
+            "files": {"type": "array", "description": "List of files to commit", "items": {"type": "string"}}
         }
     }
 ]
+
+# Rest of the app logic remains compatible; ensure model.py handles optimizations.
+if __name__ == '__main__':
+    app.run(port=FLASK_PORT, host='0.0.0.0')
