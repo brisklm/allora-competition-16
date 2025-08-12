@@ -44,22 +44,10 @@ TOOLS = [
     },
     {
         "name": "commit_to_github",
-        "description": "Commits specified files to the GitHub repository after optimization, ensuring all changes for SOL/USD prediction are included.",
+        "description": "Commits files to the GitHub repository after optimization.",
         "parameters": {
-            "files": {"type": "array", "description": "List of files to commit", "items": {"type": "string"}}
+            "files": {"type": "array", "description": "List of files to commit", "required": True},
+            "message": {"type": "string", "description": "Commit message", "required": True}
         }
     }
 ]
-
-# Add a simple route for optimization trigger
-@app.route('/optimize', methods=['POST'])
-def optimize_model():
-    try:
-        # Call the model training with Optuna tuning
-        best_params = train_model()  # Assuming train_model in model.py handles Optuna, VADER, LSTM hybrid, and data blending
-        return json.dumps({"status": "success", "best_params": best_params, "ZPTAE": "Reduced below 0.5 (optimized)"})
-    except Exception as e:
-        return json.dumps({"status": "error", "message": str(e)})
-
-if __name__ == '__main__':
-    app.run(port=FLASK_PORT)
