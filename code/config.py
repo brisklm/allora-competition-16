@@ -15,7 +15,7 @@ features_sol_path = os.path.join(data_base_path, os.getenv('FEATURES_PATH', 'fea
 features_eth_path = os.path.join(data_base_path, os.getenv('FEATURES_PATH_ETH', 'features_eth.csv'))
 TOKEN = os.getenv('TOKEN', 'SOL')
 TIMEFRAME = os.getenv('TIMEFRAME', '1d')
-TRAINING_DAYS = int(os.getenv('TRAINING_DAYS', 180))  # Increased to ensure at least MINIMUM_DAYS for ZPTAE reduction
+TRAINING_DAYS = int(os.getenv('TRAINING_DAYS', 365))  # Increased to 365 for better ZPTAE reduction
 MINIMUM_DAYS = 180
 REGION = os.getenv('REGION', 'com')
 DATA_PROVIDER = os.getenv('DATA_PROVIDER', 'binance')
@@ -25,21 +25,20 @@ HELIUS_API_KEY = os.getenv('HELIUS_API_KEY', '70ed65ce-4750-4fd5-83bd-5aee9aa79e
 HELIUS_RPC_URL = os.getenv('HELIUS_RPC_URL', 'https://mainnet.helius-rpc.com')
 BITQUERY_API_KEY = os.getenv('BITQUERY_API_KEY', 'ory_at_LmFLzUutMY8EVb-P_PQVP9ntfwUVTV05LMal7xUqb2I.vxFLfMEoLGcu4XoVi47j-E2bspraTSrmYzCt1A4y2k')
 
-# Updated SELECTED_FEATURES to include new features, VADER sentiment, and handle low variance
+# Updated SELECTED_FEATURES to include new features, handle low variance, and fix NaNs
 SELECTED_FEATURES = [
     'volatility_SOLUSDT', 'sol_btc_corr', 'sol_eth_corr', 'close_SOLUSDT_lag1', 
     'close_BTCUSDT_lag1', 'close_ETHUSDT_lag1', 'volume_change_SOLUSDT', 
-    'volatility_BTCUSDT', 'volume_change_BTCUSDT', 'momentum_SOLUSDT',  # Fixed and completed
+    'volatility_BTCUSDT', 'volume_change_BTCUSDT', 'momentum_SOLUSDT',  
     'close_SOLUSDT_lag30', 'close_BTCUSDT_lag30', 'close_ETHUSDT_lag30'  # Added as per suggestions
 ]
 
 MODEL_PARAMS = {
-    'n_estimators': 200,  # Increased as suggested to reduce ZPTAE
-    'learning_rate': 0.005,  # Adjusted as suggested
-    'epochs': 50,  # For LSTM hybrid
-    'batch_size': 32  # For handling data blending and fixing NaNs
-}
+    'n_estimators': 200,  # Increased from default to reduce ZPTAE
+    'learning_rate': 0.005,  # Adjusted for better convergence
+    'hidden_size': 64,  # For LSTM hybrid
+    'num_layers': 2  # For LSTM
+}  # Ensure handling of NaNs and low variance in data preprocessing
 
-OPTUNA_TRIALS = 100  # Increased for better hyperparameter tuning
-
-USE_SYNTHETIC_DATA = os.getenv('USE_SYNTHETIC_DATA', True)  # Enable blending of real and synthetic data
+OPTUNA_TRIALS = int(os.getenv('OPTUNA_TRIALS', 50))  # Allow for more trials if needed
+USE_SYNTHETIC_DATA = os.getenv('USE_SYNTHETIC_DATA', 'True').lower() == 'true'  # Blend real and synthetic data
