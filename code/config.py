@@ -25,20 +25,19 @@ HELIUS_API_KEY = os.getenv('HELIUS_API_KEY', '70ed65ce-4750-4fd5-83bd-5aee9aa79e
 HELIUS_RPC_URL = os.getenv('HELIUS_RPC_URL', 'https://mainnet.helius-rpc.com')
 BITQUERY_API_KEY = os.getenv('BITQUERY_API_KEY', 'ory_at_LmFLzUutMY8EVb-P_PQVP9ntfwUVTV05LMal7xUqb2I.vxFLfMEoLGcu4XoVi47j-E2bspraTSrmYzCt1A4y2k')
 
-# Updated SELECTED_FEATURES to include new features, handle low variance, and fix NaNs
+# Updated SELECTED_FEATURES to include new features, VADER sentiment, and handle low variance/fix NaNs
 SELECTED_FEATURES = [
     'volatility_SOLUSDT', 'sol_btc_corr', 'sol_eth_corr', 'close_SOLUSDT_lag1', 
     'close_BTCUSDT_lag1', 'close_ETHUSDT_lag1', 'volume_change_SOLUSDT', 
     'volatility_BTCUSDT', 'volume_change_BTCUSDT', 'momentum_SOLUSDT',  
-    'close_SOLUSDT_lag30', 'close_BTCUSDT_lag30', 'close_ETHUSDT_lag30'  # Added as per suggestions
+    'close_SOLUSDT_lag30', 'close_BTCUSDT_lag30', 'close_ETHUSDT_lag30',  # Added as per suggestions
+    'vader_compound_score'  # Added for VADER sentiment to incorporate sentiment analysis
 ]
 
 MODEL_PARAMS = {
-    'n_estimators': 200,  # Increased from default to reduce ZPTAE
-    'learning_rate': 0.005,  # Adjusted for better convergence
-    'hidden_size': 64,  # For LSTM hybrid
-    'num_layers': 2  # For LSTM
-}  # Ensure handling of NaNs and low variance in data preprocessing
+    'n_estimators': int(os.getenv('N_ESTIMATORS', 200)),  # Increased to reduce ZPTAE
+    'learning_rate': float(os.getenv('LEARNING_RATE', 0.01))  # Adjusted as per suggestions
+}
 
-OPTUNA_TRIALS = int(os.getenv('OPTUNA_TRIALS', 50))  # Allow for more trials if needed
-USE_SYNTHETIC_DATA = os.getenv('USE_SYNTHETIC_DATA', 'True').lower() == 'true'  # Blend real and synthetic data
+OPTUNA_TRIALS = int(os.getenv('OPTUNA_TRIALS', 50))  # For Optuna tuning
+USE_SYNTHETIC_DATA = bool(os.getenv('USE_SYNTHETIC_DATA', True))  # Enable blending real/synthetic data
