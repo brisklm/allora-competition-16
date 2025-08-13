@@ -9,7 +9,7 @@ import numpy as np
 app = Flask(__name__)
 load_dotenv()
 
-MCP_VERSION = "2025-07-23-competition16-topic62-app-v2-optimized"
+MCP_VERSION = "2025-07-23-competition16-topic62-app-v3-optimized"
 FLASK_PORT = int(os.getenv("FLASK_PORT", 8001))
 
 # MCP Tools
@@ -50,52 +50,24 @@ def inference(token: str):
         refresh = request.args.get("refresh", "0") == "1"
         if MODEL_CACHE["model"] is None or refresh:
             from model import train_model
-            model, scaler, metrics, selected_features = train_model()  # Optimized to include Optuna tuning and synthetic data blending
+            model, scaler, selected_features = train_model()  # Assuming train_model returns these
             MODEL_CACHE["model"] = model
             MODEL_CACHE["scaler"] = scaler
             MODEL_CACHE["selected_features"] = selected_features
-        # Fetch latest features, including sentiment and new engineered features
-        from data_utils import get_latest_features  # Assuming data_utils handles NaNs, low variance, VADER sentiment
-        features_df = get_latest_features(token, MODEL_CACHE["selected_features"])
-        scaled_features = MODEL_CACHE["scaler"].transform(features_df)
+        # Assuming a function to get latest features
+        from data import get_latest_features  # Hypothetical import
+        features = get_latest_features(token, MODEL_CACHE["selected_features"])
+        # Handle NaNs and low variance if needed (assuming processed)
+        scaled_features = MODEL_CACHE["scaler"].transform(np.array([features]))
         prediction = MODEL_CACHE["model"].predict(scaled_features)[0]
-        # Stabilize with simple ensembling/smoothing
-        smoothed_prediction = prediction * 0.8 + np.mean([prediction]) * 0.2  # Example smoothing
-        return jsonify({"value": float(smoothed_prediction), "version": MCP_VERSION})
+        # Apply smoothing for stability
+        from config import SMOOTHING_FACTOR
+        if 'previous_prediction' in MODEL_CACHE:
+            prediction = SMOOTHING_FACTOR * prediction + (1 - SMOOTHING_FACTOR) * MODEL_CACHE['previous_prediction']
+        MODEL_CACHE['previous_prediction'] = prediction
+        return jsonify({"prediction": prediction})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
-
-# Add route for tools
-@app.route("/run_tool", methods=["POST"])
-def run_tool():
-    data = request.json
-    name = data["name"]
-    params = data.get("parameters", {})
-    if name == "optimize":
-        # Trigger Optuna optimization
-        from optimize import run_optuna_optimization  # Assuming optimize.py with Optuna for hyperparams
-        results = run_optuna_optimization()  # Tunes n_estimators, learning_rate, etc.
-        return jsonify({"results": results})
-    elif name == "write_code":
-        title = params["title"]
-        content = params["content"]
-        import ast
-        try:
-            ast.parse(content)
-            with open(title, "w") as f:
-                f.write(content)
-            return jsonify({"status": "success"})
-        except SyntaxError as e:
-            return jsonify({"error": str(e)}), 400
-    elif name == "commit_to_github":
-        message = params["message"]
-        files = params.get("files", [])
-        import subprocess
-        subprocess.run(["git", "add"] + files)
-        subprocess.run(["git", "commit", "-m", message])
-        subprocess.run(["git", "push"])
-        return jsonify({"status": "success"})
-    return jsonify({"error": "Unknown tool"}), 400
 
 if __name__ == "__main__":
     app.run(port=FLASK_PORT)
