@@ -43,6 +43,41 @@ TOOLS = [
 # In-memory cache for inference
 MODEL_CACHE = {"model": None, "selected_features": []}
 
+@app.route("/tools", methods=["GET"])
+def get_tools():
+    return jsonify(TOOLS)
+
+@app.route("/", methods=["POST"])
+def handle_tool():
+    data = request.json
+    tool_name = data.get("name")
+    params = data.get("parameters", {})
+    if tool_name == "optimize":
+        from model import optuna_optimize
+        results = optuna_optimize()
+        return jsonify({"results": results})
+    elif tool_name == "write_code":
+        title = params["title"]
+        content = params["content"]
+        # Simple syntax validation (e.g., try to compile)
+        try:
+            compile(content, title, 'exec')
+        except SyntaxError as e:
+            return jsonify({"error": f"Syntax error: {str(e)}"}), 400
+        with open(title, "w") as f:
+            f.write(content)
+        return jsonify({"status": "success"})
+    elif tool_name == "commit_to_github":
+        message = params["message"]
+        files = params.get("files", [])
+        if files:
+            os.system("git add " + " ".join(files))
+        os.system(f'git commit -m "{message}"')
+        os.system("git push")
+        return jsonify({"status": "success"})
+    else:
+        return jsonify({"error": "Unknown tool"}), 400
+
 @app.route("/inference/<token>", methods=["GET"])
 def inference(token: str):
     try:
@@ -50,37 +85,20 @@ def inference(token: str):
         refresh = request.args.get("refresh", "0") == "1"
         if MODEL_CACHE["model"] is None or refresh:
             from model import train_model
-            model, scaler, metrics = train_model()
+            model, scaler, metrics, selected_features = train_model()
             MODEL_CACHE["model"] = model
             MODEL_CACHE["scaler"] = scaler
             MODEL_CACHE["metrics"] = metrics
-            from config import SELECTED_FEATURES
-            MODEL_CACHE["selected_features"] = SELECTED_FEATURES
-
-        # Assume get_current_features from model.py
-        from model import get_current_features
-        features_df = get_current_features(token)
-        selected = features_df[MODEL_CACHE["selected_features"]].values.reshape(1, -1)
-        scaled = MODEL_CACHE["scaler"].transform(selected)
-        prediction = MODEL_CACHE["model"].predict(scaled)[0]
-
-        # Add smoothing if previous prediction exists
-        if "last_prediction" in MODEL_CACHE:
-            from config import SMOOTHING_ALPHA
-            prediction = SMOOTHING_ALPHA * prediction + (1 - SMOOTHING_ALPHA) * MODEL_CACHE["last_prediction"]
-        MODEL_CACHE["last_prediction"] = prediction
-
-        return jsonify({"prediction": prediction, "timestamp": datetime.utcnow().isoformat()})
+            MODEL_CACHE["selected_features"] = selected_features
+        # Assume data module for latest features
+        from data import get_latest_features
+        latest_data = get_latest_features(token)
+        features = latest_data[MODEL_CACHE["selected_features"]].values.reshape(1, -1)
+        scaled_features = MODEL_CACHE["scaler"].transform(features)
+        prediction = MODEL_CACHE["model"].predict(scaled_features)[0]
+        return jsonify({"prediction": float(prediction), "timestamp": datetime.utcnow().isoformat(), "version": MCP_VERSION})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
-
-# Add endpoint for tools
-@app.route("/tools/optimize", methods=["POST"])
-def tool_optimize():
-    # Implement Optuna tuning
-    from model import optuna_tune  # assume exists in model.py with tuning logic
-    results = optuna_tune()
-    return jsonify(results)
 
 if __name__ == "__main__":
     app.run(port=FLASK_PORT, debug=True)
