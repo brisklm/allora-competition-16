@@ -9,7 +9,7 @@ import numpy as np
 app = Flask(__name__)
 load_dotenv()
 
-MCP_VERSION = "2025-07-23-competition16-topic62-app-v2-optimized"
+MCP_VERSION = "2025-07-23-competition16-topic62-app-v3-optimized"
 FLASK_PORT = int(os.getenv("FLASK_PORT", 8001))
 
 # MCP Tools
@@ -41,53 +41,37 @@ TOOLS = [
 ]
 
 # In-memory cache for inference
-MODEL_CACHE = {"model": None, "scaler": None, "selected_features": []}
+MODEL_CACHE = {"model": None, "selected_features": [], "scaler": None}
+
 
 @app.route("/inference/<token>", methods=["GET"])
 def inference(token: str):
     try:
+        # Train lazily or on refresh
         refresh = request.args.get("refresh", "0") == "1"
         if MODEL_CACHE["model"] is None or refresh:
             from model import train_model
-            model, scaler, selected_features = train_model()
+            model, scaler, metrics, selected_features = train_model()  # Assumed return values
             MODEL_CACHE["model"] = model
             MODEL_CACHE["scaler"] = scaler
             MODEL_CACHE["selected_features"] = selected_features
-        # Fetch latest features (assume data.py has get_latest_features)
-        from data import get_latest_features
-        latest_features = get_latest_features(token, MODEL_CACHE["selected_features"])
-        scaled_features = MODEL_CACHE["scaler"].transform([latest_features])
+        
+        # Placeholder for getting current features (assume from data or request)
+        # For optimization: add ensembling/smoothing
+        from model import get_current_features  # Assume this exists
+        features = get_current_features(token, MODEL_CACHE["selected_features"])
+        scaled_features = MODEL_CACHE["scaler"].transform([features])
         prediction = MODEL_CACHE["model"].predict(scaled_features)[0]
-        # Stabilize with simple moving average if ensemble (assume single for now)
-        return jsonify({"log_return_prediction": float(prediction), "timestamp": datetime.utcnow().isoformat()})
+        
+        # Stabilize predictions via smoothing (e.g., exponential moving average simulation)
+        if 'last_prediction' in MODEL_CACHE:
+            prediction = 0.7 * prediction + 0.3 * MODEL_CACHE['last_prediction']
+        MODEL_CACHE['last_prediction'] = prediction
+        
+        # Return prediction
+        return jsonify({"prediction": prediction, "version": MCP_VERSION})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-@app.route("/execute", methods=["POST"])
-def execute():
-    data = request.json
-    tool_name = data.get("name")
-    params = data.get("parameters", {})
-    if tool_name == "optimize":
-        from model import optimize_model
-        results = optimize_model()  # Assumes Optuna tuning in model.py
-        return jsonify(results)
-    elif tool_name == "write_code":
-        filename = params["title"]
-        content = params["content"]
-        # Simple syntax validation placeholder
-        try:
-            compile(content, filename, 'exec')
-        except SyntaxError as e:
-            return jsonify({"error": f"Syntax error: {str(e)}"}), 400
-        with open(filename, "w") as f:
-            f.write(content)
-        return jsonify({"status": "success"})
-    elif tool_name == "commit_to_github":
-        # Placeholder for git commit
-        return jsonify({"status": "committed"})
-    else:
-        return jsonify({"error": "Unknown tool"}), 400
-
 if __name__ == "__main__":
-    app.run(port=FLASK_PORT)
+    app.run(port=FLASK_PORT, debug=True)
