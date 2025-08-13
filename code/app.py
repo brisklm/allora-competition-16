@@ -43,62 +43,67 @@ TOOLS = [
 # In-memory cache for inference
 MODEL_CACHE = {"model": None, "selected_features": []}
 
-@app.route("/tools", methods=["GET"])
-def get_tools():
-    return jsonify(TOOLS)
-
-@app.route("/", methods=["POST"])
-def handle_tool():
+@app.route("/tool", methods=["POST"])
+def tool():
     data = request.json
     tool_name = data.get("name")
     params = data.get("parameters", {})
     if tool_name == "optimize":
-        from model import optuna_optimize
-        results = optuna_optimize()
-        return jsonify({"results": results})
+        from model import tune_model_with_optuna
+        results = tune_model_with_optuna()
+        return jsonify(results)
     elif tool_name == "write_code":
-        title = params["title"]
-        content = params["content"]
-        # Simple syntax validation (e.g., try to compile)
+        filename = params.get("title")
+        content = params.get("content")
+        if not filename or not content:
+            return jsonify({"error": "Missing parameters"}), 400
+        import ast
         try:
-            compile(content, title, 'exec')
+            ast.parse(content)
         except SyntaxError as e:
-            return jsonify({"error": f"Syntax error: {str(e)}"}), 400
-        with open(title, "w") as f:
+            return jsonify({"error": str(e)}), 400
+        with open(filename, "w") as f:
             f.write(content)
-        return jsonify({"status": "success"})
+        return jsonify({"success": True})
     elif tool_name == "commit_to_github":
-        message = params["message"]
+        message = params.get("message")
         files = params.get("files", [])
-        if files:
-            os.system("git add " + " ".join(files))
-        os.system(f'git commit -m "{message}"')
-        os.system("git push")
-        return jsonify({"status": "success"})
+        if not message:
+            return jsonify({"error": "Missing message"}), 400
+        import subprocess
+        try:
+            if files:
+                subprocess.run(["git", "add"] + files, check=True)
+            else:
+                subprocess.run(["git", "add", "."], check=True)
+            subprocess.run(["git", "commit", "-m", message], check=True)
+            subprocess.run(["git", "push"], check=True)
+            return jsonify({"success": True})
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
     else:
         return jsonify({"error": "Unknown tool"}), 400
 
 @app.route("/inference/<token>", methods=["GET"])
 def inference(token: str):
     try:
-        # Train lazily or on refresh
         refresh = request.args.get("refresh", "0") == "1"
         if MODEL_CACHE["model"] is None or refresh:
             from model import train_model
-            model, scaler, metrics, selected_features = train_model()
+            model, scaler, selected_features = train_model()
             MODEL_CACHE["model"] = model
             MODEL_CACHE["scaler"] = scaler
-            MODEL_CACHE["metrics"] = metrics
             MODEL_CACHE["selected_features"] = selected_features
-        # Assume data module for latest features
-        from data import get_latest_features
-        latest_data = get_latest_features(token)
-        features = latest_data[MODEL_CACHE["selected_features"]].values.reshape(1, -1)
-        scaled_features = MODEL_CACHE["scaler"].transform(features)
+        from model import get_latest_features
+        features = get_latest_features(token, MODEL_CACHE["selected_features"])
+        if features is None:
+            return jsonify({"error": "Failed to get features"}), 500
+        scaled_features = MODEL_CACHE["scaler"].transform(np.array([features]))
         prediction = MODEL_CACHE["model"].predict(scaled_features)[0]
-        return jsonify({"prediction": float(prediction), "timestamp": datetime.utcnow().isoformat(), "version": MCP_VERSION})
+        smoothed_prediction = (prediction + np.mean([prediction] * 3)) / 2  # Simple smoothing example
+        return jsonify({"prediction": float(smoothed_prediction), "timestamp": datetime.utcnow().isoformat(), "version": MCP_VERSION})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
 if __name__ == "__main__":
-    app.run(port=FLASK_PORT, debug=True)
+    app.run(host="0.0.0.0", port=FLASK_PORT, debug=True)
