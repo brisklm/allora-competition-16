@@ -41,7 +41,7 @@ TOOLS = [
 ]
 
 # In-memory cache for inference
-MODEL_CACHE = {"model": None, "selected_features": [], "scaler": None, "metrics": None}
+MODEL_CACHE = {"model": None, "selected_features": [], "scaler": None}
 
 
 @app.route("/inference/<token>", methods=["GET"])
@@ -51,16 +51,23 @@ def inference(token: str):
         refresh = request.args.get("refresh", "0") == "1"
         if MODEL_CACHE["model"] is None or refresh:
             from model import train_model
-            model, scaler, metrics, selected_features = train_model()
+            model, scaler, selected_features = train_model()
             MODEL_CACHE["model"] = model
             MODEL_CACHE["scaler"] = scaler
-            MODEL_CACHE["metrics"] = metrics
             MODEL_CACHE["selected_features"] = selected_features
-        # Placeholder for actual inference logic
-        # Load latest data, add sentiment, handle NaNs, predict log-return
-        # For optimization: add ensembling/smoothing
-        prediction = np.random.rand()  # Replace with actual prediction
-        return jsonify({"prediction": prediction, "version": MCP_VERSION})
+        # Fetch latest data (assume data_fetcher exists)
+        from data_fetcher import get_latest_data
+        latest_data = get_latest_data(token)
+        # Prepare features (assume prepare_features exists in model.py or elsewhere)
+        from model import prepare_features
+        features = prepare_features(latest_data, MODEL_CACHE["selected_features"])
+        scaled_features = MODEL_CACHE["scaler"].transform(np.array([features]))
+        prediction = MODEL_CACHE["model"].predict(scaled_features)[0]
+        # Stabilize with smoothing (simple EMA example, assume prev_pred in cache)
+        if 'prev_pred' in MODEL_CACHE:
+            prediction = MODEL_CACHE['prev_pred'] * 0.8 + prediction * 0.2
+        MODEL_CACHE['prev_pred'] = prediction
+        return jsonify({"prediction": float(prediction), "timestamp": datetime.now().isoformat(), "version": MCP_VERSION})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
