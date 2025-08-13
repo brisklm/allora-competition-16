@@ -4,6 +4,8 @@ from datetime import datetime
 from flask import Flask, request, Response, jsonify
 from dotenv import load_dotenv
 import numpy as np
+import ast
+import git
 
 # Initialize app and env
 app = Flask(__name__)
@@ -41,35 +43,72 @@ TOOLS = [
 ]
 
 # In-memory cache for inference
-MODEL_CACHE = {"model": None, "selected_features": [], "scaler": None}
+MODEL_CACHE = {"model": None, "selected_features": [], "scaler": None, "metrics": None}
 
+@app.route("/tools", methods=["GET"])
+def get_tools():
+    return jsonify(TOOLS)
+
+@app.route("/tool/optimize", methods=["POST"])
+def tool_optimize():
+    try:
+        from model import optimize_model
+        results = optimize_model()
+        return jsonify(results)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/tool/write_code", methods=["POST"])
+def tool_write_code():
+    try:
+        data = request.json
+        title = data["title"]
+        content = data["content"]
+        try:
+            ast.parse(content)
+        except SyntaxError as e:
+            return jsonify({"error": f"Syntax error: {str(e)}"}), 400
+        with open(title, "w") as f:
+            f.write(content)
+        return jsonify({"success": True, "message": f"File {title} written successfully"})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/tool/commit_to_github", methods=["POST"])
+def tool_commit_to_github():
+    try:
+        data = request.json
+        message = data["message"]
+        files = data.get("files", [])
+        repo = git.Repo(os.getcwd())
+        if files:
+            repo.git.add(files)
+        else:
+            repo.git.add(".")
+        repo.git.commit("-m", message)
+        repo.git.push()
+        return jsonify({"success": True, "message": "Committed and pushed to GitHub"})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 @app.route("/inference/<token>", methods=["GET"])
 def inference(token: str):
     try:
-        # Train lazily or on refresh
         refresh = request.args.get("refresh", "0") == "1"
         if MODEL_CACHE["model"] is None or refresh:
             from model import train_model
-            model, scaler, metrics, selected_features = train_model()  # Assumed return values
+            model, scaler, metrics, selected_features = train_model()
             MODEL_CACHE["model"] = model
             MODEL_CACHE["scaler"] = scaler
+            MODEL_CACHE["metrics"] = metrics
             MODEL_CACHE["selected_features"] = selected_features
-        
-        # Placeholder for getting current features (assume from data or request)
-        # For optimization: add ensembling/smoothing
-        from model import get_current_features  # Assume this exists
-        features = get_current_features(token, MODEL_CACHE["selected_features"])
+        from model import get_current_features
+        features = get_current_features(token)
         scaled_features = MODEL_CACHE["scaler"].transform([features])
         prediction = MODEL_CACHE["model"].predict(scaled_features)[0]
-        
-        # Stabilize predictions via smoothing (e.g., exponential moving average simulation)
-        if 'last_prediction' in MODEL_CACHE:
-            prediction = 0.7 * prediction + 0.3 * MODEL_CACHE['last_prediction']
-        MODEL_CACHE['last_prediction'] = prediction
-        
-        # Return prediction
-        return jsonify({"prediction": prediction, "version": MCP_VERSION})
+        smoothed_prediction = 0.8 * prediction + 0.2 * np.mean([prediction])  # Simple smoothing example
+        response = {"prediction": smoothed_prediction, "timestamp": datetime.utcnow().isoformat(), "version": MCP_VERSION}
+        return jsonify(response)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
