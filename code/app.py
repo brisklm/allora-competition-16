@@ -41,8 +41,41 @@ TOOLS = [
 ]
 
 # In-memory cache for inference
-MODEL_CACHE = {"model": None, "selected_features": []}
+MODEL_CACHE = {"model": None, "selected_features": [], "scaler": None, "metrics": None}
 
+@app.route("/tools", methods=["GET"])
+def get_tools():
+    return jsonify(TOOLS)
+
+@app.route("/tool", methods=["POST"])
+def call_tool():
+    data = request.json
+    name = data.get("name")
+    params = data.get("parameters", {})
+    if name == "optimize":
+        from model import run_optuna_tuning  # Assume this exists in model.py for Optuna
+        results = run_optuna_tuning()
+        return jsonify(results)
+    elif name == "write_code":
+        title = params["title"]
+        content = params["content"]
+        try:
+            compile(content, title, "exec")
+        except SyntaxError as e:
+            return jsonify({"error": "Syntax error: " + str(e)}), 400
+        with open(title, "w") as f:
+            f.write(content)
+        return jsonify({"success": True})
+    elif name == "commit_to_github":
+        message = params["message"]
+        files = params.get("files", [])
+        import subprocess
+        subprocess.run(["git", "add"] + files)
+        subprocess.run(["git", "commit", "-m", message])
+        subprocess.run(["git", "push"])
+        return jsonify({"success": True})
+    else:
+        return jsonify({"error": "Unknown tool"}), 400
 
 @app.route("/inference/<token>", methods=["GET"])
 def inference(token: str):
@@ -56,10 +89,10 @@ def inference(token: str):
             MODEL_CACHE["scaler"] = scaler
             MODEL_CACHE["metrics"] = metrics
             MODEL_CACHE["selected_features"] = selected_features
-        # Prediction
-        from model import predict
-        prediction = predict(MODEL_CACHE["model"], MODEL_CACHE["scaler"], token)
-        return jsonify({"prediction": prediction})
+        # Get latest prediction with smoothing (e.g., ensemble or EMA)
+        from model import get_latest_prediction  # Assume this fetches latest features, predicts, and applies smoothing/ensembling
+        prediction = get_latest_prediction(MODEL_CACHE["model"], MODEL_CACHE["scaler"], MODEL_CACHE["selected_features"])
+        return jsonify({"prediction": prediction, "metrics": MODEL_CACHE["metrics"]})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
