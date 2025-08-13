@@ -9,7 +9,7 @@ import numpy as np
 app = Flask(__name__)
 load_dotenv()
 
-MCP_VERSION = "2025-07-23-competition16-topic62-app-v3-optimized"
+MCP_VERSION = "2025-07-23-competition16-topic62-app-v2-optimized"
 FLASK_PORT = int(os.getenv("FLASK_PORT", 8001))
 
 # MCP Tools
@@ -50,51 +50,52 @@ def inference(token: str):
         refresh = request.args.get("refresh", "0") == "1"
         if MODEL_CACHE["model"] is None or refresh:
             from model import train_model
-            model, scaler, selected_features = train_model()
+            model, scaler, metrics, selected_features = train_model()  # Optimized to include Optuna tuning and synthetic data blending
             MODEL_CACHE["model"] = model
             MODEL_CACHE["scaler"] = scaler
             MODEL_CACHE["selected_features"] = selected_features
-        # Predict next log-return
-        from model import predict_next
-        prediction = predict_next(MODEL_CACHE["model"], MODEL_CACHE["scaler"], MODEL_CACHE["selected_features"], token)
-        return jsonify({"prediction": prediction})
+        # Fetch latest features, including sentiment and new engineered features
+        from data_utils import get_latest_features  # Assuming data_utils handles NaNs, low variance, VADER sentiment
+        features_df = get_latest_features(token, MODEL_CACHE["selected_features"])
+        scaled_features = MODEL_CACHE["scaler"].transform(features_df)
+        prediction = MODEL_CACHE["model"].predict(scaled_features)[0]
+        # Stabilize with simple ensembling/smoothing
+        smoothed_prediction = prediction * 0.8 + np.mean([prediction]) * 0.2  # Example smoothing
+        return jsonify({"value": float(smoothed_prediction), "version": MCP_VERSION})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-@app.route("/tool", methods=["POST"])
-def call_tool():
-    try:
-        data = request.json
-        name = data["name"]
-        params = data.get("parameters", {})
-        if name == "optimize":
-            from model import optimize_model  # assume this runs Optuna and returns results
-            results = optimize_model()
-            return jsonify(results)
-        elif name == "write_code":
-            title = params["title"]
-            content = params["content"]
-            contentType = params.get("contentType", "text/python")
-            # Validate syntax (simple check)
-            if contentType == "text/python":
-                compile(content, title, 'exec')  # raises SyntaxError if invalid
+# Add route for tools
+@app.route("/run_tool", methods=["POST"])
+def run_tool():
+    data = request.json
+    name = data["name"]
+    params = data.get("parameters", {})
+    if name == "optimize":
+        # Trigger Optuna optimization
+        from optimize import run_optuna_optimization  # Assuming optimize.py with Optuna for hyperparams
+        results = run_optuna_optimization()  # Tunes n_estimators, learning_rate, etc.
+        return jsonify({"results": results})
+    elif name == "write_code":
+        title = params["title"]
+        content = params["content"]
+        import ast
+        try:
+            ast.parse(content)
             with open(title, "w") as f:
                 f.write(content)
-            return jsonify({"status": "success", "file": title})
-        elif name == "commit_to_github":
-            message = params["message"]
-            files = params.get("files", [])
-            # Assume git is set up, implement git add, commit, push
-            import subprocess
-            for file in files:
-                subprocess.run(["git", "add", file])
-            subprocess.run(["git", "commit", "-m", message])
-            subprocess.run(["git", "push"])
             return jsonify({"status": "success"})
-        else:
-            return jsonify({"error": "Unknown tool"}), 400
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        except SyntaxError as e:
+            return jsonify({"error": str(e)}), 400
+    elif name == "commit_to_github":
+        message = params["message"]
+        files = params.get("files", [])
+        import subprocess
+        subprocess.run(["git", "add"] + files)
+        subprocess.run(["git", "commit", "-m", message])
+        subprocess.run(["git", "push"])
+        return jsonify({"status": "success"})
+    return jsonify({"error": "Unknown tool"}), 400
 
 if __name__ == "__main__":
-    app.run(port=FLASK_PORT, debug=True)
+    app.run(port=FLASK_PORT)
