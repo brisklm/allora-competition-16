@@ -43,6 +43,7 @@ TOOLS = [
 # In-memory cache for inference
 MODEL_CACHE = {"model": None, "selected_features": [], "scaler": None, "metrics": None}
 
+
 @app.route("/inference/<token>", methods=["GET"])
 def inference(token: str):
     try:
@@ -55,60 +56,13 @@ def inference(token: str):
             MODEL_CACHE["scaler"] = scaler
             MODEL_CACHE["metrics"] = metrics
             MODEL_CACHE["selected_features"] = selected_features
-        # Get current features for the token
-        from features import get_current_features  # assuming this exists and handles sentiment, etc.
-        features = get_current_features(token, MODEL_CACHE["selected_features"])
-        # Fix NaNs and low variance
-        features = np.nan_to_num(features, nan=0.0)
-        # Assuming scaling handles low variance
-        scaled_features = MODEL_CACHE["scaler"].transform([features])
-        prediction = MODEL_CACHE["model"].predict(scaled_features)[0]
-        # Stabilize with simple ensembling or smoothing (placeholder: average with previous if available)
-        if "last_prediction" in MODEL_CACHE:
-            prediction = 0.7 * prediction + 0.3 * MODEL_CACHE["last_prediction"]
-        MODEL_CACHE["last_prediction"] = prediction
-        return jsonify({"prediction": float(prediction), "timestamp": datetime.now().isoformat()})
+        # Placeholder for actual inference logic
+        # Load latest data, add sentiment, handle NaNs, predict log-return
+        # For optimization: add ensembling/smoothing
+        prediction = np.random.rand()  # Replace with actual prediction
+        return jsonify({"prediction": prediction, "version": MCP_VERSION})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
-
-@app.route("/tools", methods=["GET"])
-def get_tools():
-    return jsonify(TOOLS)
-
-@app.route("/call_tool", methods=["POST"])
-def call_tool():
-    data = request.json
-    tool_name = data.get("name")
-    params = data.get("parameters", {})
-    if tool_name == "optimize":
-        # Trigger Optuna optimization, blend data, tune for lower ZPTAE, higher R2, etc.
-        from optimizer import run_optuna_optimization  # assuming implemented with suggestions
-        results = run_optuna_optimization()  # Includes tuning n_estimators, learning_rate, adding lags, etc.
-        return jsonify({"results": results})
-    elif tool_name == "write_code":
-        filename = params["title"]
-        content = params["content"]
-        content_type = params.get("contentType", "text/python")
-        try:
-            compile(content, filename, "exec")
-        except SyntaxError as e:
-            return jsonify({"error": "Syntax error: " + str(e)}), 400
-        with open(filename, "w") as f:
-            f.write(content)
-        artifact_id = params.get("artifact_id", str(np.random.uuid4()))
-        return jsonify({"success": True, "artifact_id": artifact_id})
-    elif tool_name == "commit_to_github":
-        message = params["message"]
-        files = params["files"]
-        try:
-            os.system("git add " + " ".join(files))
-            os.system(f'git commit -m "{message}"')
-            os.system("git push")
-            return jsonify({"success": True})
-        except Exception as e:
-            return jsonify({"error": str(e)}), 500
-    else:
-        return jsonify({"error": "Unknown tool"}), 400
 
 if __name__ == "__main__":
     app.run(port=FLASK_PORT, debug=True)
