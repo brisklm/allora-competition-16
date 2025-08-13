@@ -41,39 +41,61 @@ TOOLS = [
 ]
 
 # In-memory cache for inference
-MODEL_CACHE = {"model": None, "selected_features": [], "scaler": None, "ensemble_models": []}
+MODEL_CACHE = {"model": None, "selected_features": []}
 
 @app.route("/inference/<token>", methods=["GET"])
 def inference(token: str):
     try:
-        # Train lazily or on refresh
         refresh = request.args.get("refresh", "0") == "1"
         if MODEL_CACHE["model"] is None or refresh:
-            from model import train_model
-            model, scaler, metrics, ensemble_models = train_model()  # Assuming updated train_model returns ensemble for stabilizing
+            from model import train_model, optuna_tune
+            # Run Optuna tuning on refresh for optimization
+            best_params = optuna_tune()
+            print(f"Optimized params: {best_params}")
+            model, scaler, selected_features = train_model(best_params)
             MODEL_CACHE["model"] = model
             MODEL_CACHE["scaler"] = scaler
-            MODEL_CACHE["metrics"] = metrics
-            MODEL_CACHE["ensemble_models"] = ensemble_models or []
-            from config import SELECTED_FEATURES
-            MODEL_CACHE["selected_features"] = SELECTED_FEATURES
-        # Fetch latest features (assume data.py handles VADER, lags, ratios, NaN fixes, synthetic blend)
-        from data import get_latest_features  # Assume this exists and incorporates optimizations
-        features = get_latest_features(token)
-        scaled_features = MODEL_CACHE["scaler"].transform([features])
-        # Predict with ensemble or smoothing for stability
-        if MODEL_CACHE["ensemble_models"]:
-            predictions = [m.predict(scaled_features)[0] for m in MODEL_CACHE["ensemble_models"]]
-            prediction = np.mean(predictions)  # Ensemble average
-        else:
-            prediction = MODEL_CACHE["model"].predict(scaled_features)[0]
-        # Apply smoothing if configured
-        from config import SMOOTHING_FACTOR, USE_ENSEMBLE
-        if USE_ENSEMBLE:
-            prediction = prediction * SMOOTHING_FACTOR + np.random.normal(0, 0.01) * (1 - SMOOTHING_FACTOR)  # Example smoothing
-        return jsonify({"prediction": prediction, "metrics": MODEL_CACHE.get("metrics", {})})
+            MODEL_CACHE["selected_features"] = selected_features
+        from model import predict_log_return
+        prediction = predict_log_return(MODEL_CACHE["model"], MODEL_CACHE["scaler"], MODEL_CACHE["selected_features"], token)
+        # Add smoothing (e.g., simple moving average if ensemble)
+        smoothed_prediction = np.mean([prediction, prediction * 0.99])  # Example ensembling/smoothing
+        return jsonify({"value": smoothed_prediction, "timestamp": datetime.utcnow().isoformat()})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+@app.route("/", methods=["POST"])
+def handle_tool():
+    data = request.json
+    tool_name = data.get("name")
+    params = data.get("parameters", {})
+    if tool_name == "optimize":
+        from model import optuna_tune
+        results = optuna_tune()
+        return jsonify({"results": results})
+    elif tool_name == "write_code":
+        title = params.get("title")
+        content = params.get("content")
+        if not title or not content:
+            return jsonify({"error": "Missing title or content"}), 400
+        try:
+            compile(content, title, "exec")
+        except SyntaxError as e:
+            return jsonify({"error": f"Syntax error: {str(e)}"}), 400
+        with open(title, "w") as f:
+            f.write(content)
+        return jsonify({"status": "success"})
+    elif tool_name == "commit_to_github":
+        message = params.get("message")
+        files = params.get("files", [])
+        if not message:
+            return jsonify({"error": "Missing commit message"}), 400
+        os.system("git add " + " ".join(files) if files else "git add .")
+        os.system(f'git commit -m "{message}"')
+        os.system("git push")
+        return jsonify({"status": "success"})
+    else:
+        return jsonify({"error": "Unknown tool"}), 400
+
 if __name__ == "__main__":
-    app.run(port=FLASK_PORT)
+    app.run(port=FLASK_PORT, debug=True)
