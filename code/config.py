@@ -23,7 +23,11 @@ CG_API_KEY = os.getenv('CG_API_KEY', 'CG-xA5NyokGEVbc4bwrvJPcpZvT')
 HELIUS_API_KEY = os.getenv('HELIUS_API_KEY', '70ed65ce-4750-4fd5-83bd-5aee9aa79ead')
 HELIUS_RPC_URL = os.getenv('HELIUS_RPC_URL', 'https://mainnet.helius-rpc.com')
 BITQUERY_API_KEY = os.getenv('BITQUERY_API_KEY', 'ory_at_LmFLzUutMY8EVb-P_PQVP9ntfwUVTV05LMal7xUqb2I.vxFLfMEoLGcu4XoVi47j-E2bspraTSrmYzCt1A4y2k')
-SELECTED_FEATURES = ['volatility_SOLUSDT', 'sol_btc_corr', 'sol_eth_corr', 'close_SOLUSDT_lag1', 'close_BTCUSDT_lag1', 'close_ETHUSDT_lag1', 'volume_change_SOLUSDT', 'volatility_BTCUSDT', 'volume_change_BTCUSDT', 'momentum_SOLUSDT', 'close_SOLUSDT_lag30', 'close_BTCUSDT_lag30', 'close_ETHUSDT_lag30']
-MODEL_PARAMS = {'n_estimators': 800, 'learning_rate': 0.005, 'hidden_size': 64, 'num_layers': 2}
-OPTUNA_TRIALS = int(os.getenv('OPTUNA_TRIALS', 50))
-USE_SYNTHETIC_DATA = os.getenv('USE_SYNTHETIC_DATA', 'True').lower() == 'true'
+SELECTED_FEATURES = ['volatility_SOLUSDT', 'sol_btc_corr', 'sol_eth_corr', 'close_SOLUSDT_lag1', 'close_BTCUSDT_lag1', 'close_ETHUSDT_lag1', 'volume_change_SOLUSDT', 'volatility_BTCUSDT', 'volume_change_BTCUSDT', 'momentum_SOLUSDT', 'close_SOLUSDT_lag30', 'close_BTCUSDT_lag30', 'close_ETHUSDT_lag30', 'vader_sentiment_score', 'sol_btc_ratio', 'sol_eth_ratio', 'log_return_lag1_SOL', 'sign_log_return_lag1', 'momentum_filter_10d']
+MODEL_PARAMS = {'n_estimators': 1000, 'learning_rate': 0.01, 'max_depth': 6, 'num_leaves': 31, 'reg_lambda': 0.5, 'hidden_size': 128, 'num_layers': 3}
+OPTUNA_TRIALS = int(os.getenv('OPTUNA_TRIALS', 100))
+USE_SYNTHETIC_DATA = os.getenv('USE_SYNTHETIC_DATA', 'True')
+SMOOTHING_WINDOW = 3
+# Additional for NaN handling
+NAN_FILL_METHOD = 'ffill'
+LOW_VARIANCE_THRESHOLD = 0.01
