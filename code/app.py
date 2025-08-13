@@ -4,13 +4,12 @@ from datetime import datetime
 from flask import Flask, request, Response, jsonify
 from dotenv import load_dotenv
 import numpy as np
-import git  # added for commit
 
 # Initialize app and env
 app = Flask(__name__)
 load_dotenv()
 
-MCP_VERSION = "2025-07-23-competition16-topic62-app-v2-optimized"
+MCP_VERSION = "2025-07-23-competition16-topic62-app-v3-optimized"
 FLASK_PORT = int(os.getenv("FLASK_PORT", 8001))
 
 # MCP Tools
@@ -55,59 +54,45 @@ def inference(token: str):
             MODEL_CACHE["model"] = model
             MODEL_CACHE["scaler"] = scaler
             MODEL_CACHE["selected_features"] = selected_features
-
-        # Assume get_current_features function in data_prep.py or model.py
-        from data_prep import get_current_features
-        features_df = get_current_features(token, MODEL_CACHE["selected_features"])
-        features_scaled = MODEL_CACHE["scaler"].transform(features_df)
-        prediction = MODEL_CACHE["model"].predict(features_scaled)[0]
-        return jsonify({"prediction": prediction, "version": MCP_VERSION})
+        # Predict next log-return
+        from model import predict_next
+        prediction = predict_next(MODEL_CACHE["model"], MODEL_CACHE["scaler"], MODEL_CACHE["selected_features"], token)
+        return jsonify({"prediction": prediction})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-# Add route for tools
-@app.route("/tools", methods=["GET"])
-def get_tools():
-    return jsonify(TOOLS)
-
-@app.route("/tool/optimize", methods=["POST"])
-def tool_optimize():
+@app.route("/tool", methods=["POST"])
+def call_tool():
     try:
-        from tuning import run_optuna_tuning  # assume there's a tuning.py with optuna
-        results = run_optuna_tuning()  # runs optuna, returns best params or something
-        # Perhaps update config or something, but return results
-        return jsonify(results)
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-@app.route("/tool/write_code", methods=["POST"])
-def tool_write_code():
-    data = request.json
-    title = data.get("title")
-    content = data.get("content")
-    if not title or not content:
-        return jsonify({"error": "Missing title or content"}), 400
-    try:
-        compile(content, title, 'exec')
-    except SyntaxError as e:
-        return jsonify({"error": f"Syntax error: {str(e)}"}), 400
-    with open(title, "w") as f:
-        f.write(content)
-    return jsonify({"status": "success", "file": title})
-
-@app.route("/tool/commit_to_github", methods=["POST"])
-def tool_commit_to_github():
-    data = request.json
-    message = data.get("message")
-    files = data.get("files", [])
-    if not message:
-        return jsonify({"error": "Missing commit message"}), 400
-    try:
-        repo = git.Repo(os.getcwd())
-        repo.git.add(files if files else '.')
-        repo.git.commit(m=message)
-        repo.git.push()
-        return jsonify({"status": "success"})
+        data = request.json
+        name = data["name"]
+        params = data.get("parameters", {})
+        if name == "optimize":
+            from model import optimize_model  # assume this runs Optuna and returns results
+            results = optimize_model()
+            return jsonify(results)
+        elif name == "write_code":
+            title = params["title"]
+            content = params["content"]
+            contentType = params.get("contentType", "text/python")
+            # Validate syntax (simple check)
+            if contentType == "text/python":
+                compile(content, title, 'exec')  # raises SyntaxError if invalid
+            with open(title, "w") as f:
+                f.write(content)
+            return jsonify({"status": "success", "file": title})
+        elif name == "commit_to_github":
+            message = params["message"]
+            files = params.get("files", [])
+            # Assume git is set up, implement git add, commit, push
+            import subprocess
+            for file in files:
+                subprocess.run(["git", "add", file])
+            subprocess.run(["git", "commit", "-m", message])
+            subprocess.run(["git", "push"])
+            return jsonify({"status": "success"})
+        else:
+            return jsonify({"error": "Unknown tool"}), 400
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
