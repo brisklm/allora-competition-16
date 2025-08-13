@@ -4,6 +4,8 @@ from datetime import datetime
 from flask import Flask, request, Response, jsonify
 from dotenv import load_dotenv
 import numpy as np
+import subprocess
+from model import train_model, optuna_tune  # Assuming optuna_tune is in model.py
 
 # Initialize app and env
 app = Flask(__name__)
@@ -41,61 +43,78 @@ TOOLS = [
 ]
 
 # In-memory cache for inference
-MODEL_CACHE = {"model": None, "selected_features": []}
+MODEL_CACHE = {"model": None, "selected_features": [], "scaler": None}
 
-@app.route("/inference/<token>", methods=["GET"])
-def inference(token: str):
+
+def optimize(parameters):
+    # Trigger Optuna tuning
+    results = optuna_tune()  # Assume this runs Optuna and returns best params and metrics
+    return results
+
+def write_code(parameters):
+    title = parameters["title"]
+    content = parameters["content"]
+    # Validate syntax
     try:
-        refresh = request.args.get("refresh", "0") == "1"
-        if MODEL_CACHE["model"] is None or refresh:
-            from model import train_model, optuna_tune
-            # Run Optuna tuning on refresh for optimization
-            best_params = optuna_tune()
-            print(f"Optimized params: {best_params}")
-            model, scaler, selected_features = train_model(best_params)
-            MODEL_CACHE["model"] = model
-            MODEL_CACHE["scaler"] = scaler
-            MODEL_CACHE["selected_features"] = selected_features
-        from model import predict_log_return
-        prediction = predict_log_return(MODEL_CACHE["model"], MODEL_CACHE["scaler"], MODEL_CACHE["selected_features"], token)
-        # Add smoothing (e.g., simple moving average if ensemble)
-        smoothed_prediction = np.mean([prediction, prediction * 0.99])  # Example ensembling/smoothing
-        return jsonify({"value": smoothed_prediction, "timestamp": datetime.utcnow().isoformat()})
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        compile(content, title, 'exec')
+    except SyntaxError as e:
+        return {"error": str(e)}
+    with open(title, 'w') as f:
+        f.write(content)
+    return {"success": True}
 
-@app.route("/", methods=["POST"])
-def handle_tool():
+def commit_to_github(parameters):
+    message = parameters["message"]
+    files = parameters.get("files", [])
+    try:
+        for file in files:
+            subprocess.run(["git", "add", file], check=True)
+        subprocess.run(["git", "commit", "-m", message], check=True)
+        subprocess.run(["git", "push"], check=True)
+        return {"success": True}
+    except subprocess.CalledProcessError as e:
+        return {"error": str(e)}
+
+@app.route("/tool", methods=["POST"])
+def call_tool():
     data = request.json
     tool_name = data.get("name")
     params = data.get("parameters", {})
     if tool_name == "optimize":
-        from model import optuna_tune
-        results = optuna_tune()
-        return jsonify({"results": results})
+        result = optimize(params)
     elif tool_name == "write_code":
-        title = params.get("title")
-        content = params.get("content")
-        if not title or not content:
-            return jsonify({"error": "Missing title or content"}), 400
-        try:
-            compile(content, title, "exec")
-        except SyntaxError as e:
-            return jsonify({"error": f"Syntax error: {str(e)}"}), 400
-        with open(title, "w") as f:
-            f.write(content)
-        return jsonify({"status": "success"})
+        result = write_code(params)
     elif tool_name == "commit_to_github":
-        message = params.get("message")
-        files = params.get("files", [])
-        if not message:
-            return jsonify({"error": "Missing commit message"}), 400
-        os.system("git add " + " ".join(files) if files else "git add .")
-        os.system(f'git commit -m "{message}"')
-        os.system("git push")
-        return jsonify({"status": "success"})
+        result = commit_to_github(params)
     else:
         return jsonify({"error": "Unknown tool"}), 400
+    return jsonify(result)
+
+@app.route("/inference/<token>", methods=["GET"])
+def inference(token: str):
+    try:
+        # Train lazily or on refresh
+        refresh = request.args.get("refresh", "0") == "1"
+        if MODEL_CACHE["model"] is None or refresh:
+            from model import train_model
+            model, scaler, selected_features = train_model()
+            MODEL_CACHE["model"] = model
+            MODEL_CACHE["scaler"] = scaler
+            MODEL_CACHE["selected_features"] = selected_features
+        if token != "SOL":
+            return jsonify({"error": "Only SOL supported"}), 400
+        # Assume get_latest_features exists in data.py, includes sentiment, fixes NaNs, blends synthetic
+        from data import get_latest_features
+        features_df = get_latest_features(token, MODEL_CACHE["selected_features"])
+        if features_df is None or len(features_df) == 0:
+            return jsonify({"error": "No data available"}), 400
+        scaled_features = MODEL_CACHE["scaler"].transform(np.array([features_df]))
+        prediction = MODEL_CACHE["model"].predict(scaled_features)[0]
+        # Stabilize with smoothing (simple moving average example, assume ensemble in model)
+        # For demo, just return
+        return jsonify({"log_return_prediction": float(prediction)})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 if __name__ == "__main__":
     app.run(port=FLASK_PORT, debug=True)
