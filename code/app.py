@@ -9,7 +9,7 @@ import numpy as np
 app = Flask(__name__)
 load_dotenv()
 
-MCP_VERSION = "2025-07-23-competition16-topic62-app-v3-superoptimized"
+MCP_VERSION = "2025-07-23-competition16-topic62-app-v2-optimized"
 FLASK_PORT = int(os.getenv("FLASK_PORT", 8001))
 
 # MCP Tools
@@ -41,7 +41,8 @@ TOOLS = [
 ]
 
 # In-memory cache for inference
-MODEL_CACHE = {"model": None, "selected_features": [], "scaler": None}
+MODEL_CACHE = {"model": None, "selected_features": []}
+
 
 @app.route("/inference/<token>", methods=["GET"])
 def inference(token: str):
@@ -50,32 +51,19 @@ def inference(token: str):
         refresh = request.args.get("refresh", "0") == "1"
         if MODEL_CACHE["model"] is None or refresh:
             from model import train_model
-            model, scaler, selected_features = train_model()  # Optimized with Optuna and hybrid LSTM
+            model, scaler, metrics, selected_features = train_model()
             MODEL_CACHE["model"] = model
             MODEL_CACHE["scaler"] = scaler
+            MODEL_CACHE["metrics"] = metrics
             MODEL_CACHE["selected_features"] = selected_features
-        # Assume get_latest_features blends real/synthetic data, fixes NaNs/low variance
-        from data import get_latest_features  # Assume this exists and handles blending/sentiment
-        features = get_latest_features(token, MODEL_CACHE["selected_features"])
-        if features is None:
-            return jsonify({"error": "Unable to fetch features"}), 500
-        scaled_features = MODEL_CACHE["scaler"].transform(np.array([features]))
-        prediction = MODEL_CACHE["model"].predict(scaled_features)[0]
-        # Stabilize with smoothing
-        from utils import smooth_prediction  # Assume utility for smoothing/ensembling
-        smoothed_pred = smooth_prediction(prediction)
-        return jsonify({"prediction": float(smoothed_pred), "timestamp": datetime.utcnow().isoformat()})
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-@app.route("/optimize", methods=["POST"])
-def optimize():
-    try:
-        from model import optimize_model  # Optuna tuning with more trials
-        results = optimize_model()
-        return jsonify(results)
+        # Predict
+        from model import prepare_latest_features, predict
+        features = prepare_latest_features(token, MODEL_CACHE["selected_features"])
+        scaled_features = MODEL_CACHE["scaler"].transform([features])
+        prediction = predict(MODEL_CACHE["model"], scaled_features)
+        return jsonify({"prediction": prediction[0], "metrics": MODEL_CACHE["metrics"]})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
 if __name__ == "__main__":
-    app.run(port=FLASK_PORT, debug=True)
+    app.run(port=FLASK_PORT)
