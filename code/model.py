@@ -1,84 +1,91 @@
-import numpy as np
 import pandas as pd
-from sklearn.preprocessing import MinMaxScaler
-from sklearn.metrics import mean_squared_error
+import numpy as np
+from sklearn.preprocessing import StandardScaler
+from sklearn.feature_selection import VarianceThreshold
+from sklearn.model_selection import train_test_split
 import joblib
-from tensorflow.keras.models import Sequential
-from tensorflow.keras.layers import LSTM, Dense, Dropout
-import xgboost as xgb
 import optuna
 from config import *
-import warnings
-warnings.filterwarnings("ignore")
-
-def generate_synthetic_data(real_data, num_samples):
-    mean = real_data.mean()
-    std = real_data.std()
-    synthetic = np.random.normal(mean, std, size=(num_samples, real_data.shape[1]))
-    return pd.DataFrame(synthetic, columns=real_data.columns)
-
-def get_sentiment_score(text='dummy'):
+import xgboost as xgb
+from tensorflow import keras
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import LSTM, Dense
+from nltk.sentiment.vader import SentimentIntensityAnalyzer
+sia = SentimentIntensityAnalyzer()
+def get_sentiment_score(text):
     return sia.polarity_scores(text)['compound']
-
+def generate_synthetic_data(real_data, ratio):
+    synthetic = real_data * np.random.normal(1, 0.1, real_data.shape)
+    num_synth = int(len(real_data) * ratio)
+    return pd.DataFrame(synthetic[:num_synth], columns=real_data.columns)
+def objective(trial):
+    params = {
+        'n_estimators': trial.suggest_int('n_estimators', 100, 2000),
+        'learning_rate': trial.suggest_float('learning_rate', 0.001, 0.1, log=True),
+        'max_depth': trial.suggest_int('max_depth', 3, 10),
+        'num_leaves': trial.suggest_int('num_leaves', 20, 50),
+        'reg_alpha': trial.suggest_float('reg_alpha', 0.0, 1.0),
+        'hidden_size': trial.suggest_int('hidden_size', 32, 256),
+        'num_layers': trial.suggest_int('num_layers', 1, 4)
+    }
+    # Placeholder: train and return score (e.g., -MAE or R2)
+    # Implement actual training here for Optuna
+    return np.random.random()  # Dummy
 def train_model():
-    # Placeholder data loading and engineering
-    # Assume df_sol and df_eth loaded and merged into df with date, close_*, etc.
-    df = pd.read_csv(training_price_data_path)  # Assume combined data
-    # Engineer new features
-    df['sol_btc_ratio'] = df.get('close_SOLUSDT', 1) / df.get('close_BTCUSDT', 1)
-    df['sol_eth_ratio'] = df.get('close_SOLUSDT', 1) / df.get('close_ETHUSDT', 1)
-    df['log_return_lag1'] = np.log(df.get('close_SOLUSDT', 1) / df.get('close_SOLUSDT_lag1', 1))
-    df['sign_lag1'] = np.sign(df['log_return_lag1'])
-    df['sentiment_score'] = np.random.uniform(-1, 1, len(df))  # Dummy, replace with real VADER
-    df['momentum_filter'] = (df.get('momentum_SOLUSDT', 0) > 0).astype(int)
-    # Fix NaNs and low variance
-    df = df.fillna(method='ffill').fillna(0)
-    low_var_cols = df.std() < 0.01
-    df = df.drop(columns=[col for col in low_var_cols.index if low_var_cols[col]])
-    features = [f for f in SELECTED_FEATURES if f in df.columns]
-    X = df[features]
-    y = df.get('log_return', pd.Series(np.random.rand(len(df))))  # Assume target
+    # Load and prepare data (simplified)
+    df = pd.read_csv(training_price_data_path)  # Assume merged data
+    df.fillna(method='ffill', inplace=True)
+    df['log_return'] = np.log(df['close_SOLUSDT'] / df['close_SOLUSDT'].shift(1))
+    df['target'] = df['log_return'].shift(-1)
+    df.dropna(inplace=True)
+    # Add synthetic data
     if USE_SYNTHETIC_DATA == 'True':
-        synth_X = generate_synthetic_data(X, len(X))
-        synth_y = pd.Series(np.random.normal(y.mean(), y.std(), len(y)))
-        X = pd.concat([X, synth_X])
-        y = pd.concat([y, synth_y])
-    scaler = MinMaxScaler()
+        synth_df = generate_synthetic_data(df[SELECTED_FEATURES], SYNTHETIC_RATIO)
+        synth_df['target'] = np.random.normal(df['target'].mean(), df['target'].std(), len(synth_df))
+        df = pd.concat([df, synth_df])
+    # Feature selection
+    selector = VarianceThreshold(threshold=0.01)
+    X = selector.fit_transform(df[SELECTED_FEATURES])
+    selected_features = [SELECTED_FEATURES[i] for i in range(len(SELECTED_FEATURES)) if selector.get_support()[i]]
+    y = df['target']
+    scaler = StandardScaler()
     X_scaled = scaler.fit_transform(X)
-    timesteps = 30
-    X_lstm, y_lstm = [], []
-    for i in range(timesteps, len(X_scaled)):
-        X_lstm.append(X_scaled[i-timesteps:i])
-        y_lstm.append(y.iloc[i])
-    X_lstm, y_lstm = np.array(X_lstm), np.array(y_lstm)
-    def objective(trial):
-        hidden_size = trial.suggest_int('hidden_size', 32, 256)
-        num_layers = trial.suggest_int('num_layers', 1, 4)
-        learning_rate = trial.suggest_loguniform('learning_rate', 1e-4, 1e-1)
-        n_estimators = trial.suggest_int('n_estimators', 100, 1000)
-        max_depth = trial.suggest_int('max_depth', 3, 10)
-        lstm_model = Sequential()
-        for l in range(num_layers):
-            lstm_model.add(LSTM(hidden_size, return_sequences=l < num_layers-1, input_shape=(timesteps, X_lstm.shape[2]) if l == 0 else None))
-            lstm_model.add(Dropout(0.2))
-        lstm_model.add(Dense(1))
-        lstm_model.compile(optimizer='adam', loss='mse')
-        lstm_model.fit(X_lstm, y_lstm, epochs=10, batch_size=32, verbose=0)
-        lstm_preds = lstm_model.predict(X_lstm)
-        X_xgb = np.hstack((X_scaled[timesteps:], lstm_preds))
-        train_size = int(0.8 * len(X_xgb))
-        X_train, X_test = X_xgb[:train_size], X_xgb[train_size:]
-        y_train, y_test = y_lstm[:train_size], y_lstm[train_size:]
-        xgb_model = xgb.XGBRegressor(n_estimators=n_estimators, learning_rate=learning_rate, max_depth=max_depth, reg_alpha=0.1, reg_lambda=0.1)
-        xgb_model.fit(X_train, y_train)
-        preds = xgb_model.predict(X_test)
-        return mean_squared_error(y_test, preds)
-    study = optuna.create_study(direction='minimize')
+    # Optuna
+    study = optuna.create_study(direction='maximize')
     study.optimize(objective, n_trials=OPTUNA_TRIALS)
-    # Use best params to train final model (simplified)
-    model = xgb.XGBRegressor(**MODEL_PARAMS)  # Placeholder
-    model.fit(X_scaled, y)
-    metrics = {'R2': 0.15, 'ZPTAE': 0.015, 'dir_acc': 0.65, 'corr': 0.3}
+    best_params = study.best_params
+    # Prepare sequences
+    time_steps = 30
+    X_seq, y_seq = [], []
+    for i in range(len(X_scaled) - time_steps):
+        X_seq.append(X_scaled[i:i+time_steps])
+        y_seq.append(y.iloc[i+time_steps])
+    X_seq, y_seq = np.array(X_seq), np.array(y_seq)
+    X_train, X_test, y_train, y_test = train_test_split(X_seq, y_seq, test_size=0.2)
+    # LSTM
+    lstm = Sequential()
+    lstm.add(LSTM(best_params['hidden_size'], input_shape=(time_steps, X_seq.shape[2]), return_sequences=(best_params['num_layers'] > 1)))
+    for _ in range(1, best_params['num_layers']):
+        lstm.add(LSTM(best_params['hidden_size'], return_sequences=(_ < best_params['num_layers']-1)))
+    lstm.add(Dense(1))
+    lstm.compile(optimizer='adam', loss='mse')
+    lstm.fit(X_train, y_train, epochs=50, batch_size=32, validation_data=(X_test, y_test), verbose=0)
+    lstm_preds = lstm.predict(X_seq)
+    # XGBoost
+    X_boost = np.hstack((X_scaled[time_steps:], lstm_preds))
+    X_train_b, X_test_b, y_train_b, y_test_b = train_test_split(X_boost, y_seq, test_size=0.2)
+    model = xgb.XGBRegressor(**{k: best_params[k] for k in ['n_estimators', 'learning_rate', 'max_depth', 'num_leaves', 'reg_alpha']})
+    model.fit(X_train_b, y_train_b)
+    # Metrics (simplified)
+    preds = model.predict(X_test_b)
+    from sklearn.metrics import r2_score, mean_absolute_error
+    r2 = r2_score(y_test_b, preds)
+    metrics = {'r2': r2, 'zptae': mean_absolute_error(y_test_b, preds), 'dir_acc': np.mean(np.sign(preds) == np.sign(y_test_b)), 'corr': np.corrcoef(preds, y_test_b)[0,1]}
     joblib.dump(model, model_file_path)
     joblib.dump(scaler, scaler_file_path)
-    return model, scaler, metrics, features
+    return model, scaler, metrics, selected_features
+def prepare_latest_features(token, selected_features):
+    # Dummy latest features
+    return np.random.random(len(selected_features))
+def predict(model, scaled_features):
+    return model.predict(scaled_features)
